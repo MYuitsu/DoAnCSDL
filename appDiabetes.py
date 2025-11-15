@@ -31,7 +31,7 @@ def _parse_date_any(s):
 
 # --- Redis Connection with connection pooling ---
 redis_pool = redis.ConnectionPool(
-    host='10.8.0.10', 
+    host='localhost', 
     port=6379, 
     db=0, 
     decode_responses=True,
@@ -578,6 +578,11 @@ def cache_test():
 def distributed_test():
     return render_template('distributed-test.html')
 
+@app.route('/node-patients')
+def node_patients():
+    """Trang hiển thị danh sách bệnh nhân theo từng node"""
+    return render_template('node-patients.html')
+
 # ===== CockroachDB Distributed System APIs =====
 
 @app.route('/api/cluster/connectivity', methods=['GET'])
@@ -599,77 +604,114 @@ def cluster_connectivity():
 
 @app.route('/api/cluster/nodes', methods=['GET'])
 def cluster_nodes():
-    """Get information about all nodes in the cluster"""
+    """Get information about all nodes in the cluster by querying each node directly"""
     try:
-        # Join kv_node_status with kv_node_liveness for complete info
-        query = text("""
-            SELECT 
-                s.node_id, 
-                s.address, 
-                s.locality, 
-                s.server_version, 
-                s.started_at, 
-                s.updated_at,
-                l.epoch,
-                l.expiration,
-                l.draining,
-                l.membership
-            FROM crdb_internal.kv_node_status s
-            LEFT JOIN crdb_internal.kv_node_liveness l ON s.node_id = l.node_id
-            ORDER BY s.node_id
-        """)
-        result = db.session.execute(query)
-        nodes = []
-        
+        from sqlalchemy import create_engine
         from datetime import datetime, timedelta
         
-        for row in result:
-            # Simplified logic: if node has liveness data and membership is active, it's live
-            is_live = True
-            is_draining = False
-            membership_status = 'active'
+        nodes = []
+        
+        # Try to connect to each configured node directly
+        for node_url in CLUSTER_NODES:
+            node_address = node_url.split('@')[1].split('/')[0]
+            node_host = node_address.split(':')[0]
             
-            if row[9]:  # membership status exists
-                membership_status = row[9]
-                # Node is live only if membership is active AND not draining
-                is_live = membership_status == 'active'
-            
-            if row[8] is not None:  # draining status
-                is_draining = bool(row[8])
-                # If draining, node is effectively dead
-                if is_draining:
-                    is_live = False
-            
-            # Calculate uptime
-            uptime_str = 'Unknown'
-            if row[4]:  # started_at
-                try:
-                    uptime_delta = datetime.now(row[4].tzinfo if hasattr(row[4], 'tzinfo') else None) - row[4]
-                    hours = int(uptime_delta.total_seconds() // 3600)
-                    if hours < 1:
-                        uptime_str = f"{int(uptime_delta.total_seconds() // 60)} minutes"
-                    elif hours < 24:
-                        uptime_str = f"{hours} hours"
-                    else:
-                        days = hours // 24
-                        uptime_str = f"{days} day{'s' if days > 1 else ''}"
-                except:
-                    uptime_str = 'Unknown'
-            
-            nodes.append({
-                'node_id': row[0],
-                'address': row[1],
-                'locality': row[2] if row[2] else 'default',
-                'server_version': row[3] if row[3] else 'unknown',
-                'started_at': str(row[4]) if row[4] else None,
-                'updated_at': str(row[5]) if row[5] else None,
-                'uptime': uptime_str,
-                'is_live': is_live,
-                'is_available': is_live and not is_draining,
-                'is_draining': is_draining,
-                'membership': membership_status,
-                'epoch': row[6] if row[6] else None
-            })
+            try:
+                print(f"🔍 Checking node at {node_address}...")
+                
+                # Create direct connection to this specific node
+                node_engine = create_engine(
+                    node_url,
+                    pool_pre_ping=True,
+                    pool_size=2,
+                    max_overflow=5,
+                    connect_args={
+                        'connect_timeout': 3,
+                        'options': '-c statement_timeout=5000'
+                    }
+                )
+                
+                # Query node information directly from this node
+                with node_engine.connect() as conn:
+                    query = text("""
+                        SELECT 
+                            s.node_id, 
+                            s.address, 
+                            s.locality, 
+                            s.server_version, 
+                            s.started_at, 
+                            s.updated_at,
+                            l.epoch,
+                            l.expiration,
+                            l.draining,
+                            l.membership
+                        FROM crdb_internal.kv_node_status s
+                        LEFT JOIN crdb_internal.kv_node_liveness l ON s.node_id = l.node_id
+                        WHERE s.address = :address
+                        LIMIT 1
+                    """)
+                    
+                    result = conn.execute(query, {'address': node_address}).fetchone()
+                    
+                    if result:
+                        # Node responded - it's online
+                        is_live = True
+                        is_draining = False
+                        membership_status = 'active'
+                        
+                        if result[9]:  # membership status exists
+                            membership_status = result[9]
+                            is_live = membership_status == 'active'
+                        
+                        if result[8] is not None:  # draining status
+                            is_draining = bool(result[8])
+                            if is_draining:
+                                is_live = False
+                        
+                        # Calculate uptime
+                        uptime_str = 'Unknown'
+                        if result[4]:  # started_at
+                            try:
+                                uptime_delta = datetime.now(result[4].tzinfo if hasattr(result[4], 'tzinfo') else None) - result[4]
+                                hours = int(uptime_delta.total_seconds() // 3600)
+                                if hours < 1:
+                                    uptime_str = f"{int(uptime_delta.total_seconds() // 60)} minutes"
+                                elif hours < 24:
+                                    uptime_str = f"{hours} hours"
+                                else:
+                                    days = hours // 24
+                                    uptime_str = f"{days} day{'s' if days > 1 else ''}"
+                            except:
+                                uptime_str = 'Unknown'
+                        
+                        nodes.append({
+                            'node_id': result[0],
+                            'address': result[1],
+                            'locality': result[2] if result[2] else 'default',
+                            'server_version': result[3] if result[3] else 'unknown',
+                            'started_at': str(result[4]) if result[4] else None,
+                            'updated_at': str(result[5]) if result[5] else None,
+                            'uptime': uptime_str,
+                            'is_live': is_live,
+                            'is_available': is_live and not is_draining,
+                            'is_draining': is_draining,
+                            'membership': membership_status,
+                            'epoch': result[6] if result[6] else None,
+                            'connection_method': 'direct'
+                        })
+                        
+                        print(f"   ✅ Node {result[0]} at {node_address} is ONLINE (membership: {membership_status})")
+                    
+                # Clean up connection
+                node_engine.dispose()
+                
+            except Exception as node_error:
+                # Node is unreachable - mark as dead
+                print(f"   ❌ Node at {node_address} is OFFLINE: {str(node_error)[:80]}")
+                # Don't add dead nodes to the list
+                continue
+        
+        print(f"📊 Found {len(nodes)} online nodes")
         return jsonify({'success': True, 'nodes': nodes, 'count': len(nodes)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -900,12 +942,14 @@ def failover_test():
 
 @app.route('/api/cluster/patients-by-node/<int:node_id>', methods=['GET'])
 def patients_by_node(node_id):
-    """Get patients data from specific node (or nearest replica)"""
+    """Get patients data directly from specific node by creating direct connection"""
     try:
         import time
+        from sqlalchemy import create_engine
+        
         start_time = time.time()
 
-        # Get node information
+        # Get node information first
         target_node = None
         node_info_query = text("""
             SELECT s.node_id, s.address
@@ -921,35 +965,61 @@ def patients_by_node(node_id):
         else:
             raise ValueError(f'Node {node_id} not found in cluster metadata')
 
-        # Query to get patients with their location information
-        # Note: CockroachDB automatically routes to optimal replicas
-        # Using AS OF SYSTEM TIME follower_read_timestamp() allows reading from any replica
-        query = text("""
-            SELECT 
-                b.id,
-                b.ho_ten,
-                b.ngay_sinh,
-                b.gioi_tinh,
-                b.so_dien_thoai,
-                b.so_cmnd,
-                t.ten_tinh,
-                x.ten_xa,
-                b.dia_chi,
-                b.email,
-                b.created_at,
-                COUNT(l.id) as total_visits
-            FROM benhnhan b
-            LEFT JOIN dmtinh t ON b.ma_tinh = t.ma_tinh
-            LEFT JOIN dmxa x ON b.ma_xa = x.ma_xa
-            LEFT JOIN lankham l ON b.id = l.benh_nhan_id
-            GROUP BY b.id, b.ho_ten, b.ngay_sinh, b.gioi_tinh, b.so_dien_thoai, 
-                     b.so_cmnd, t.ten_tinh, x.ten_xa, b.dia_chi, b.email, b.created_at
-            ORDER BY b.created_at DESC
-            LIMIT 50
-        """)
-
-        result = db.session.execute(query).fetchall()
+        # Extract host and port from address (format: host:port)
+        node_address = target_node['address']
+        
+        # Create direct connection to specific node
+        node_url = f'cockroachdb://root@{node_address}/diabetesdb?sslmode=disable&application_name=DiabetesDB_NodeQuery_{node_id}'
+        
+        print(f"📍 Creating direct connection to Node {node_id} at {node_address}")
+        
+        # Create engine for specific node
+        node_engine = create_engine(
+            node_url,
+            pool_pre_ping=True,
+            pool_size=2,
+            max_overflow=5,
+            connect_args={
+                'connect_timeout': 5,
+                'options': '-c statement_timeout=30000'
+            }
+        )
+        
+        # Execute query on specific node
+        with node_engine.connect() as conn:
+            # Query to get patients with their location information
+            query = text("""
+                SELECT 
+                    b.id,
+                    b.ho_ten,
+                    b.ngay_sinh,
+                    b.gioi_tinh,
+                    b.so_dien_thoai,
+                    b.so_cmnd,
+                    t.ten_tinh,
+                    x.ten_xa,
+                    b.dia_chi,
+                    b.email,
+                    b.created_at,
+                    COUNT(l.id) as total_visits
+                FROM benhnhan b
+                LEFT JOIN dmtinh t ON b.ma_tinh = t.ma_tinh
+                LEFT JOIN dmxa x ON b.ma_xa = x.ma_xa
+                LEFT JOIN lankham l ON b.id = l.benh_nhan_id
+                GROUP BY b.id, b.ho_ten, b.ngay_sinh, b.gioi_tinh, b.so_dien_thoai, 
+                         b.so_cmnd, t.ten_tinh, x.ten_xa, b.dia_chi, b.email, b.created_at
+                ORDER BY b.created_at DESC
+                LIMIT 50
+            """)
+            
+            result = conn.execute(query).fetchall()
+            
+        # Clean up engine
+        node_engine.dispose()
+        
         execution_time = (time.time() - start_time) * 1000
+        
+        print(f"✅ Query completed on Node {node_id} in {execution_time:.2f}ms")
         
         patients = []
         for row in result:
@@ -974,11 +1044,14 @@ def patients_by_node(node_id):
             'node': target_node,
             'execution_time_ms': round(execution_time, 2),
             'total': len(patients),
-            'patients': patients
+            'patients': patients,
+            'queried_directly': True,
+            'connection_url': node_address
         })
     except ValueError as ve:
         return jsonify({'success': False, 'error': str(ve)}), 404
     except Exception as e:
+        print(f"❌ Error querying Node {node_id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/cluster/patients-distributed', methods=['GET'])

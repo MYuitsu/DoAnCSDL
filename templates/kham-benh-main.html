@@ -26,10 +26,11 @@
 
 
 <!-- Navigation Menu -->
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-3">
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-3 shadow">
     <div class="container-fluid">
-        <a class="navbar-brand" href="/">
-            <i class="bi bi-hospital"></i> Hệ Thống Quản Lý Bệnh Nhân
+        <a class="navbar-brand d-flex align-items-center" href="/">
+            <i class="bi bi-hospital-fill me-2" style="font-size: 1.5rem;"></i>
+            <strong>Hệ Thống Quản Lý Bệnh Nhân</strong>
         </a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
                 aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
@@ -38,24 +39,128 @@
         <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="navbar-nav ms-auto">
                 <li class="nav-item">
-                    <a class="nav-link active" href="/">
-                        <i class="bi bi-house-door"></i> Trang Chủ
+                    <a class="nav-link active px-3" href="/" id="menu-home">
+                        <i class="bi bi-house-door-fill me-1"></i> Trang Chủ
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="/cache-test">
-                        <i class="bi bi-speedometer2"></i> Kiểm Tra Cache
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle px-3" href="#" id="navbarDropdownMonitor" role="button" 
+                       data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-speedometer2 me-1"></i> Giám Sát Hệ Thống
                     </a>
+                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdownMonitor">
+                        <li>
+                            <a class="dropdown-item" href="/cache-test" id="menu-cache">
+                                <i class="bi bi-hdd-network text-info me-2"></i> Kiểm Tra Cache (Redis)
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="/node-patients" id="menu-distributed">
+                                <i class="bi bi-diagram-3 text-success me-2"></i> Kiểm Tra Phân Tán (Cluster)
+                            </a>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item" href="#" onclick="checkSystemStatus(); return false;">
+                                <i class="bi bi-activity text-warning me-2"></i> Trạng Thái Hệ Thống
+                            </a>
+                        </li>
+                    </ul>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="/distributed-test">
-                        <i class="bi bi-diagram-3"></i> Kiểm Tra Phân Tán
+                    <a class="nav-link px-3" href="#" onclick="showAbout(); return false;">
+                        <i class="bi bi-info-circle me-1"></i> Giới Thiệu
                     </a>
                 </li>
             </ul>
         </div>
     </div>
 </nav>
+
+<!-- System Status Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+    <div id="statusToast" class="toast hide" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header bg-info text-white">
+            <i class="bi bi-activity me-2"></i>
+            <strong class="me-auto">Trạng Thái Hệ Thống</strong>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body" id="statusToastBody">
+            Đang kiểm tra...
+        </div>
+    </div>
+</div>
+
+<script>
+// Check system status function
+function checkSystemStatus() {
+    const toast = new bootstrap.Toast(document.getElementById('statusToast'));
+    document.getElementById('statusToastBody').innerHTML = '<i class="bi bi-hourglass-split"></i> Đang kiểm tra trạng thái...';
+    toast.show();
+    
+    // Check cluster connectivity
+    fetch('/api/cluster/connectivity')
+        .then(response => response.json())
+        .then(data => {
+            let statusHtml = '<div class="small">';
+            statusHtml += `<p class="mb-2"><strong>Database Cluster:</strong></p>`;
+            statusHtml += `<ul class="mb-2">`;
+            statusHtml += `<li>Nodes Online: <span class="badge bg-success">${data.online_count}/${data.total_count}</span></li>`;
+            statusHtml += `<li>Status: ${data.cluster_healthy ? '<span class="text-success">✓ Healthy</span>' : '<span class="text-danger">✗ Error</span>'}</li>`;
+            statusHtml += `</ul>`;
+            statusHtml += '</div>';
+            document.getElementById('statusToastBody').innerHTML = statusHtml;
+        })
+        .catch(error => {
+            document.getElementById('statusToastBody').innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Không thể kết nối hệ thống</span>';
+        });
+}
+
+// Show about modal
+function showAbout() {
+    Swal.fire({
+        title: '<strong>Hệ Thống Quản Lý Bệnh Nhân</strong>',
+        icon: 'info',
+        html: `
+            <div class="text-start">
+                <p><strong>Phiên bản:</strong> 1.0.0</p>
+                <p><strong>Công nghệ:</strong></p>
+                <ul>
+                    <li>Backend: Flask (Python)</li>
+                    <li>Database: CockroachDB (Distributed)</li>
+                    <li>Cache: Redis</li>
+                    <li>Frontend: Bootstrap 5</li>
+                </ul>
+                <p><strong>Tính năng:</strong></p>
+                <ul>
+                    <li>Quản lý thông tin bệnh nhân</li>
+                    <li>Quản lý lần khám bệnh</li>
+                    <li>Hệ thống phân tán cao</li>
+                    <li>Cache thông minh</li>
+                </ul>
+            </div>
+        `,
+        showCloseButton: true,
+        confirmButtonText: 'Đóng',
+        confirmButtonColor: '#0d6efd'
+    });
+}
+
+// Highlight active menu item
+document.addEventListener('DOMContentLoaded', function() {
+    const currentPath = window.location.pathname;
+    document.querySelectorAll('.navbar-nav .nav-link, .dropdown-item').forEach(link => {
+        if (link.getAttribute('href') === currentPath) {
+            link.classList.add('active');
+            // If it's a dropdown item, also highlight the parent
+            const dropdown = link.closest('.dropdown');
+            if (dropdown) {
+                dropdown.querySelector('.dropdown-toggle').classList.add('active');
+            }
+        }
+    });
+});
+</script>
 
 <div class="row">
     <div class="col-5">

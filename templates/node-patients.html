@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Danh Sách Bệnh Nhân Theo Node - CockroachDB Cluster</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/node-patients.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header class="page-header">
+            <h1>🏥 Danh Sách Bệnh Nhân Theo Node</h1>
+            <p class="subtitle">Phân tán dữ liệu trên CockroachDB Cluster</p>
+        </header>
+
+        <!-- Cluster Overview -->
+        <section class="cluster-overview">
+            <div class="cluster-header">
+                <h2>📊 Tổng Quan Cluster</h2>
+                <button id="refreshBtn" class="btn-refresh">🔄 Làm mới</button>
+            </div>
+            <div id="clusterInfo" class="cluster-info">
+                <div class="info-card">
+                    <div class="info-label">Tổng số Nodes</div>
+                    <div class="info-value" id="totalNodes">-</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-label">Nodes Online</div>
+                    <div class="info-value" id="onlineNodes">-</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-label">Tổng Bệnh Nhân</div>
+                    <div class="info-value" id="totalPatients">-</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Node Selector -->
+        <section class="node-selector">
+            <div class="selector-header">
+                <h2>🔍 Chọn Node để xem dữ liệu</h2>
+                <button id="selectAllNodesBtn" class="btn-select-all">✅ Select tất cả nodes</button>
+            </div>
+            <div id="nodeButtons" class="node-buttons">
+                <!-- Node buttons will be inserted here by JavaScript -->
+            </div>
+        </section>
+
+        <!-- Loading Indicator -->
+        <div id="loadingIndicator" class="loading-indicator" style="display: none;">
+            <div class="spinner"></div>
+            <p>Đang tải dữ liệu...</p>
+        </div>
+
+        <!-- Node Data Display -->
+        <section id="nodeDataSection" class="node-data-section" style="display: none;">
+            <div class="node-data-header">
+                <h2>📍 Dữ liệu từ Node <span id="selectedNodeId">-</span></h2>
+                <div class="node-metrics">
+                    <span class="metric">
+                        <strong>Địa chỉ:</strong> <span id="nodeAddress">-</span>
+                    </span>
+                    <span class="metric">
+                        <strong>Thời gian truy vấn:</strong> <span id="queryTime">-</span> ms
+                    </span>
+                    <span class="metric">
+                        <strong>Số bệnh nhân:</strong> <span id="patientCount">-</span>
+                    </span>
+                </div>
+            </div>
+
+            <!-- Patients Table -->
+            <div class="table-container">
+                <table id="patientsTable" class="patients-table">
+                    <thead>
+                        <tr>
+                            <th>STT</th>
+                            <th>Họ và Tên</th>
+                            <th>Ngày Sinh</th>
+                            <th>Giới Tính</th>
+                            <th>Số Điện Thoại</th>
+                            <th>CMND/CCCD</th>
+                            <th>Địa Chỉ</th>
+                            <th>Email</th>
+                            <th>Số Lần Khám</th>
+                            <th>Ngày Tạo</th>
+                        </tr>
+                    </thead>
+                    <tbody id="patientsTableBody">
+                        <!-- Patient rows will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="noDataMessage" class="no-data-message" style="display: none;">
+                <p>⚠️ Không có dữ liệu bệnh nhân trên node này</p>
+            </div>
+        </section>
+
+        <!-- Individual Node Data (All Nodes) -->
+        <section class="all-nodes-section">
+            <div class="section-header">
+                <h2>📡 Danh Sách Bệnh Nhân Trên Từng Node</h2>
+                <button id="loadAllNodesBtn" class="btn-secondary">Tải dữ liệu từ tất cả nodes</button>
+            </div>
+            
+            <div id="allNodesContainer" class="all-nodes-container" style="display: none;">
+                <!-- Individual node data cards will be inserted here -->
+            </div>
+        </section>
+
+        <!-- All Nodes Data (Distributed Query) -->
+        <section class="distributed-query-section">
+            <div class="section-header">
+                <h2>🌐 Truy Vấn Phân Tán (Tất Cả Nodes)</h2>
+                <button id="queryAllNodesBtn" class="btn-primary">Truy vấn tất cả nodes</button>
+            </div>
+            
+            <div id="distributedDataSection" style="display: none;">
+                <div class="distributed-metrics">
+                    <div class="metric-card">
+                        <div class="metric-label">Tổng thời gian</div>
+                        <div class="metric-value" id="distributedQueryTime">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Nodes tham gia</div>
+                        <div class="metric-value" id="nodesUsed">-</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Tổng kết quả</div>
+                        <div class="metric-value" id="distributedTotal">-</div>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <table class="patients-table">
+                        <thead>
+                            <tr>
+                                <th>STT</th>
+                                <th>Họ và Tên</th>
+                                <th>Ngày Sinh</th>
+                                <th>Giới Tính</th>
+                                <th>Số Điện Thoại</th>
+                                <th>CMND/CCCD</th>
+                                <th>Địa Chỉ</th>
+                                <th>Email</th>
+                                <th>Số Lần Khám</th>
+                                <th>Ngày Tạo</th>
+                            </tr>
+                        </thead>
+                        <tbody id="distributedTableBody">
+                            <!-- Distributed query results will be inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Error Display -->
+        <div id="errorMessage" class="error-message" style="display: none;">
+            <span class="error-icon">⚠️</span>
+            <span id="errorText"></span>
+            <button class="close-error" onclick="closeError()">✕</button>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/node-patients.js') }}"></script>
+</body>
+</html>
