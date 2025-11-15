@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CockroachDB - Hệ thống phân tán</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <style>
+        body {
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .main-container {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .card {
+            margin-bottom: 20px;
+            border: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .node-card {
+            border-left: 4px solid #28a745;
+        }
+        .node-card.offline {
+            border-left: 4px solid #dc3545;
+            opacity: 0.7;
+        }
+        .stat-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+        .stat-value {
+            font-size: 36px;
+            font-weight: bold;
+        }
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .query-result {
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .explain-plan {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .timeline {
+            position: relative;
+            padding: 20px 0;
+        }
+        .timeline-item {
+            padding: 20px;
+            border-left: 3px solid #007bff;
+            margin-left: 20px;
+            margin-bottom: 20px;
+        }
+        .badge-node {
+            font-size: 14px;
+            padding: 5px 10px;
+        }
+        .comparison-table {
+            width: 100%;
+        }
+        .comparison-table th {
+            background: #007bff;
+            color: white;
+            text-align: center;
+        }
+        .comparison-table td {
+            text-align: center;
+            padding: 10px;
+        }
+        .faster {
+            background: #d4edda;
+            font-weight: bold;
+        }
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .range-visualization {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin: 15px 0;
+        }
+        .range-item {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+            flex: 1;
+            min-width: 200px;
+            border-left: 4px solid #007bff;
+        }
+        .replica-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            background: #28a745;
+            color: white;
+            border-radius: 3px;
+            margin: 2px;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation Menu -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-3">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-hospital"></i> Hệ Thống Quản Lý Bệnh Nhân
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
+                    aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">
+                            <i class="bi bi-house-door"></i> Trang Chủ
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/cache-test">
+                            <i class="bi bi-speedometer2"></i> Kiểm Tra Cache
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/distributed-test">
+                            <i class="bi bi-diagram-3"></i> Kiểm Tra Phân Tán
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="main-container">
+            <h1 class="mb-4">
+                <i class="bi bi-server"></i>
+                CockroachDB - Hệ thống Cơ sở Dữ liệu Phân tán
+            </h1>
+
+            <!-- Cluster Overview -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="stat-box">
+                        <div class="stat-value" id="totalNodes">-</div>
+                        <div class="stat-label">Tổng số Node</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-box" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                        <div class="stat-value" id="totalRanges">-</div>
+                        <div class="stat-label">Tổng số Ranges</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-box" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                        <div class="stat-value" id="avgReplicas">-</div>
+                        <div class="stat-label">Trung bình Replicas</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-box" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+                        <div class="stat-value" id="replicationStatus">-</div>
+                        <div class="stat-label">Trạng thái</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12 mb-3">
+                    <button class="btn btn-primary" onclick="loadAllData()">
+                        <i class="bi bi-arrow-clockwise"></i> Làm mới tất cả
+                    </button>
+                </div>
+            </div>
+
+            <!-- Node Information -->
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">
+                        <i class="bi bi-hdd-network"></i> 
+                        1. Thông tin các Node trong Cluster
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div id="nodesList" class="row">
+                        <div class="col-12 text-center">
+                            <div class="loading"></div> Đang tải...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Distributed Query Test -->
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">
+                        <i class="bi bi-diagram-3"></i> 
+                        2. Danh sách Bệnh nhân theo Node
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <p class="text-muted">Hiển thị danh sách bệnh nhân từ từng node đang hoạt động</p>
+                    </div>
+                    <button class="btn btn-primary" onclick="loadPatientsByNode()">
+                        <i class="bi bi-people-fill"></i> Tải danh sách bệnh nhân
+                    </button>
+                    <div id="patientsByNodeResult" class="mt-3"></div>
+                </div>
+            </div>
+
+            <!-- Local vs Distributed Comparison -->
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">
+                        <i class="bi bi-speedometer2"></i> 
+                        3. So sánh Truy vấn Cục bộ vs Phân tán
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <button class="btn btn-info" onclick="compareQueries()">
+                        <i class="bi bi-bar-chart-fill"></i> Chạy so sánh
+                    </button>
+                    <div id="comparisonResult" class="mt-3"></div>
+                </div>
+            </div>
+
+            <!-- Replication & Synchronization -->
+            <div class="card">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="mb-0">
+                        <i class="bi bi-arrow-repeat"></i> 
+                        4. Sao chép & Đồng bộ Dữ liệu (Replication)
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <button class="btn btn-warning" onclick="showReplication()">
+                        <i class="bi bi-diagram-2"></i> Xem phân bố dữ liệu
+                    </button>
+                    <div id="replicationInfo" class="mt-3"></div>
+                </div>
+            </div>
+
+            <!-- Data Distribution -->
+            <div class="card">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0">
+                        <i class="bi bi-table"></i> 
+                        5. Phân bố Bảng dữ liệu trên các Node
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <button class="btn btn-secondary" onclick="showTableDistribution()">
+                        <i class="bi bi-pie-chart"></i> Xem phân bố
+                    </button>
+                    <div id="tableDistribution" class="mt-3"></div>
+                </div>
+            </div>
+
+            <!-- Failover Test -->
+            <div class="card">
+                <div class="card-header bg-danger text-white">
+                    <h5 class="mb-0">
+                        <i class="bi bi-exclamation-triangle"></i> 
+                        6. Test Failover & Xử lý Lỗi
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-warning">
+                        <i class="bi bi-info-circle"></i> 
+                        Test này mô phỏng ghi dữ liệu và kiểm tra cơ chế failover khi một node bị ngắt kết nối.
+                    </div>
+                    <button class="btn btn-danger" onclick="runFailoverTest()">
+                        <i class="bi bi-shield-exclamation"></i> Chạy Failover Test
+                    </button>
+                    <div id="failoverResult" class="mt-3"></div>
+                </div>
+            </div>
+
+            <!-- Consistency Check -->
+            <div class="card">
+                <div class="card-header bg-dark text-white">
+                    <h5 class="mb-0">
+                        <i class="bi bi-check-circle"></i> 
+                        7. Kiểm tra Tính Nhất quán (Consistency Check)
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <button class="btn btn-dark" onclick="checkConsistency()">
+                        <i class="bi bi-clipboard-check"></i> Kiểm tra nhất quán
+                    </button>
+                    <div id="consistencyResult" class="mt-3"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_BASE = window.location.origin;
+
+        function initTooltips() {
+            if (typeof bootstrap === 'undefined' || !bootstrap.Tooltip) {
+                return;
+            }
+            document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+                if (el._tooltipInstance) {
+                    el._tooltipInstance.dispose();
+                }
+            });
+            const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+            tooltipTriggerList.forEach(triggerEl => {
+                triggerEl._tooltipInstance = new bootstrap.Tooltip(triggerEl);
+            });
+        }
+
+        // Load all data on page load
+        async function loadAllData() {
+            await loadNodes();
+            await loadReplicationStats();
+        }
+
+        // Load cluster nodes
+        async function loadNodes() {
+            try {
+                const response = await fetch(`${API_BASE}/api/cluster/nodes`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('totalNodes').textContent = data.count;
+                    
+                    let html = '';
+                    data.nodes.forEach(node => {
+                        const statusClass = node.is_live ? '' : 'offline';
+                        const statusIcon = node.is_live ? 
+                            '<i class="bi bi-check-circle-fill text-success"></i>' : 
+                            '<i class="bi bi-x-circle-fill text-danger"></i>';
+                        
+                        html += `
+                            <div class="col-md-6 mb-3">
+                                <div class="card node-card ${statusClass}">
+                                    <div class="card-body">
+                                        <h5>
+                                            ${statusIcon}
+                                            ${node.address} (n${node.node_id})
+                                        </h5>
+                                        <div class="row mb-2">
+                                            <div class="col-6">
+                                                <span class="badge ${node.is_live ? 'bg-success' : 'bg-danger'} px-3 py-2">
+                                                    ${node.is_live ? '● LIVE' : '● DEAD'}
+                                                </span>
+                                            </div>
+                                            <div class="col-6 text-end">
+                                                <span class="badge bg-info px-3 py-2">${node.server_version || 'N/A'}</span>
+                                            </div>
+                                        </div>
+                                        ${node.is_draining ? '<div class="alert alert-warning py-1 px-2 mb-2"><small><i class="bi bi-exclamation-triangle"></i> Draining</small></div>' : ''}
+                                        <table class="table table-sm table-borderless mb-0">
+                                            <tr>
+                                                <td width="40%"><strong>Uptime:</strong></td>
+                                                <td>${node.uptime}</td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>Membership:</strong></td>
+                                                <td>
+                                                    <span class="badge ${node.membership === 'active' ? 'bg-success' : 'bg-warning'}">
+                                                        ${node.membership}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>Locality:</strong></td>
+                                                <td>${node.locality}</td>
+                                            </tr>
+                                            ${node.epoch ? `<tr><td><strong>Epoch:</strong></td><td>${node.epoch}</td></tr>` : ''}
+                                            <tr>
+                                                <td><strong>Available:</strong></td>
+                                                <td>${node.is_available ? '<span class="text-success">✓ Yes</span>' : '<span class="text-danger">✗ No</span>'}</td>
+                                            </tr>
+                                        </table>
+                                        <div class="mt-2">
+                                            <small class="text-muted">Last updated: ${node.updated_at || 'N/A'}</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    document.getElementById('nodesList').innerHTML = html;
+                } else {
+                    document.getElementById('nodesList').innerHTML = 
+                        '<div class="alert alert-danger">Lỗi: ' + data.error + '</div>';
+                }
+            } catch (error) {
+                console.error('Error loading nodes:', error);
+                document.getElementById('nodesList').innerHTML = 
+                    '<div class="alert alert-danger">Lỗi kết nối: ' + error.message + '</div>';
+            }
+        }
+
+        // Load replication stats
+        async function loadReplicationStats() {
+            try {
+                const response = await fetch(`${API_BASE}/api/cluster/replication`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('totalRanges').textContent = data.total_ranges;
+                    document.getElementById('avgReplicas').textContent = data.avg_replicas.toFixed(1);
+                    
+                    const percentage = (data.replicated_ranges / data.total_ranges * 100).toFixed(0);
+                    document.getElementById('replicationStatus').textContent = percentage + '%';
+                }
+            } catch (error) {
+                console.error('Error loading replication stats:', error);
+            }
+        }
+
+        // Load patients by node
+        async function loadPatientsByNode() {
+            const resultDiv = document.getElementById('patientsByNodeResult');
+            resultDiv.innerHTML = '<div class="loading"></div> Đang tải...';
+            
+            try {
+                // First, get list of live nodes
+                const nodesResponse = await fetch(`${API_BASE}/api/cluster/nodes`);
+                const nodesData = await nodesResponse.json();
+                
+                if (!nodesData.success) {
+                    throw new Error(nodesData.error);
+                }
+                
+                const liveNodes = nodesData.nodes.filter(node => node.is_live);
+                
+                if (liveNodes.length === 0) {
+                    resultDiv.innerHTML = '<div class="alert alert-warning">Không có node nào đang hoạt động</div>';
+                    return;
+                }
+                
+                let html = '';
+                
+                // Load patients from each live node
+                for (const node of liveNodes) {
+                    const response = await fetch(`${API_BASE}/api/cluster/patients-by-node/${node.node_id}`);
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        html += `
+                            <div class="card mb-3">
+                                <div class="card-header bg-primary text-white">
+                                    <h6 class="mb-0">
+                                        <i class="bi bi-hdd-network"></i> 
+                                        Node ${node.node_id}: ${node.address}
+                                        <span class="badge bg-light text-dark ms-2">${data.total} bệnh nhân</span>
+                                        <span class="badge bg-info ms-2">${data.execution_time_ms} ms</span>
+                                    </h6>
+                                </div>
+                                <div class="card-body">
+                        `;
+                        
+                        if (data.patients.length > 0) {
+                            html += `
+                                <div class="table-responsive">
+                                    <table class="table table-striped table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>STT</th>
+                                                <th>Họ tên</th>
+                                                <th>Giới tính</th>
+                                                <th>Năm sinh</th>
+                                                <th>SĐT</th>
+                                                <th>Tỉnh/Thành</th>
+                                                <th>Xã/Phường</th>
+                                                <th>Số lần khám</th>
+                                                <th>Ngày tạo</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                            `;
+                            
+                            data.patients.forEach((patient, index) => {
+                                html += `
+                                    <tr>
+                                        <td>${index + 1}</td>
+                                        <td><strong>${patient.ho_ten}</strong></td>
+                                        <td>${patient.gioi_tinh}</td>
+                                        <td>${patient.ngay_sinh || 'N/A'}</td>
+                                        <td>${patient.so_dien_thoai || 'N/A'}</td>
+                                        <td>${patient.tinh || 'N/A'}</td>
+                                        <td>${patient.xa || 'N/A'}</td>
+                                        <td><span class="badge bg-info">${patient.total_visits}</span></td>
+                                        <td><small>${patient.created_at}</small></td>
+                                    </tr>
+                                `;
+                            });
+                            
+                            html += `
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `;
+                        } else {
+                            html += '<div class="alert alert-info">Không có dữ liệu bệnh nhân</div>';
+                        }
+                        
+                        html += `
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        html += `
+                            <div class="alert alert-danger">
+                                <strong>Node ${node.node_id}:</strong> ${data.error}
+                            </div>
+                        `;
+                    }
+                }
+                
+                resultDiv.innerHTML = html;
+                
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="alert alert-danger">Lỗi: ' + error.message + '</div>';
+            }
+        }
+
+        // Run distributed query
+        async function runDistributedQuery() {
+            const queryType = document.getElementById('distributedQueryType').value;
+            const resultDiv = document.getElementById('distributedQueryResult');
+            resultDiv.innerHTML = '<div class="loading"></div> Đang thực thi truy vấn...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/cluster/distributed-query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query_type: queryType })
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    let html = `
+                        <div class="query-result">
+                            <h6><i class="bi bi-lightning-fill"></i> Kết quả truy vấn</h6>
+                            <p><strong>Thời gian thực thi:</strong> ${data.execution_time_ms} ms</p>
+                            <p><strong>Loại:</strong> ${data.query_type}</p>
+                            <p><strong>Kết quả:</strong></p>
+                            <pre>${JSON.stringify(data.result.data, null, 2)}</pre>
+                        </div>
+                        <div class="mt-3">
+                            <h6><i class="bi bi-diagram-3"></i> Execution Plan (EXPLAIN):</h6>
+                            <div class="explain-plan">
+                                ${data.explain_plan.join('\n')}
+                            </div>
+                        </div>
+                    `;
+                    resultDiv.innerHTML = html;
+                } else {
+                    resultDiv.innerHTML = '<div class="alert alert-danger">Lỗi: ' + data.error + '</div>';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="alert alert-danger">Lỗi: ' + error.message + '</div>';
+            }
+        }
+
+        // Compare queries
+        async function compareQueries() {
+            const resultDiv = document.getElementById('comparisonResult');
+            resultDiv.innerHTML = '<div class="loading"></div> Đang chạy so sánh...';
+            
+            try {
+                // Run local query (direct query, processed by single node)
+                const localStart = performance.now();
+                const localResponse = await fetch(`${API_BASE}/api/benhnhan`);
+                const localData = await localResponse.json();
+                const localTime = performance.now() - localStart;
+                
+                // Run distributed query (query aggregated from multiple nodes)
+                const distResponse = await fetch(`${API_BASE}/api/cluster/patients-distributed`);
+                const distData = await distResponse.json();
+                const distTime = distData.execution_time_ms || 0;
+                
+                const speedup = localTime > distTime ? ((localTime - distTime) / localTime * 100).toFixed(1) : 0;
+                const isFaster = distTime < localTime;
+
+                const localQueryTooltip = 'Endpoint: <code>GET /api/benhnhan</code><br>SQL: <code>SELECT * FROM benhnhan ORDER BY ho_ten DESC</code><br>Executor: Node leaseholder hiện tại';
+                const localPipelineTooltip = 'Luồng xử lý: Browser → Flask → node đang active → trả JSON.<br>Không fan-out sang node khác, toàn bộ dữ liệu đọc từ một leaseholder.';
+                const distQueryTooltip = 'Endpoint: <code>GET /api/cluster/patients-distributed</code><br>SQL: <code>SELECT b.*, t.ten_tinh, x.ten_xa, COUNT(l.id)</code><br>Executor: CockroachDB DistSQL (coordinator fan-out tới các replica)';
+                const distPipelineTooltip = `Luồng xử lý: Browser → Flask → coordinator node → fan-out tới ${distData.nodes_used || 'nhiều'} nodes → tổng hợp kết quả song song.`;
+                
+                let html = `
+                    <table class="table comparison-table">
+                        <thead>
+                            <tr>
+                                <th>Loại truy vấn</th>
+                                <th>Thời gian (ms)</th>
+                                <th>Ghi chú</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="${localTime < distTime ? 'faster' : ''}">
+                                <td>
+                                    <strong>Truy vấn Cục bộ</strong>
+                                    <span class="ms-1 text-primary" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" data-bs-title="${localQueryTooltip}">
+                                        <i class="bi bi-question-circle-fill"></i>
+                                    </span>
+                                </td>
+                                <td>${localTime.toFixed(2)} ms</td>
+                                <td>
+                                    <span data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" data-bs-title="${localPipelineTooltip}">
+                                        Truy vấn trực tiếp từ một node (${Array.isArray(localData) ? localData.length : 0} bệnh nhân)
+                                    </span>
+                                </td>
+                            </tr>
+                            <tr class="${distTime < localTime ? 'faster' : ''}">
+                                <td>
+                                    <strong>Truy vấn Phân tán</strong>
+                                    <span class="ms-1 text-primary" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" data-bs-title="${distQueryTooltip}">
+                                        <i class="bi bi-question-circle-fill"></i>
+                                    </span>
+                                </td>
+                                <td>${distTime.toFixed(2)} ms ${isFaster ? '<span class="badge bg-success ms-2">⚡ Nhanh hơn ' + speedup + '%</span>' : ''}</td>
+                                <td>
+                                    <span data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true" data-bs-title="${distPipelineTooltip}">
+                                        Truy vấn tổng hợp từ ${distData.nodes_used || 'nhiều'} node (${distData.total || 0} bệnh nhân)
+                                    </span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> 
+                        <strong>Thông tin phân tán:</strong> 
+                        ${distData.success && distData.live_nodes ? 
+                            `Dữ liệu được lấy từ ${distData.nodes_used} node: ${distData.live_nodes.map(n => `Node ${n.node_id}`).join(', ')}` : 
+                            'Thông tin node không khả dụng'}
+                    </div>
+                    
+                    ${isFaster ? `
+                    <div class="card border-success mb-3">
+                        <div class="card-header bg-success text-white">
+                            <h6 class="mb-0">
+                                <i class="bi bi-lightning-fill"></i> 
+                                Tại sao Truy vấn Phân tán NHANH HƠN?
+                            </h6>
+                        </div>
+                        <div class="card-body">
+                            <h6>🔹 1. Xử lý Song song (Parallel Processing)</h6>
+                            <ul>
+                                <li><strong>Chia nhỏ công việc:</strong> CockroachDB tự động phân chia dữ liệu thành các ranges nhỏ</li>
+                                <li><strong>Nhiều node cùng xử lý:</strong> Thay vì 1 node xử lý hết, ${distData.nodes_used} node cùng làm việc đồng thời</li>
+                                <li><strong>Kết hợp kết quả:</strong> Coordinator node tổng hợp kết quả từ các node worker</li>
+                            </ul>
+                            
+                            <h6>🔹 2. Data Locality (Dữ liệu gần gũi)</h6>
+                            <ul>
+                                <li><strong>Replica gần nhất:</strong> Mỗi truy vấn được route đến replica gần nhất (thấp latency)</li>
+                                <li><strong>Leaseholder optimization:</strong> Node giữ lease xử lý read requests nhanh hơn</li>
+                                <li><strong>Giảm network I/O:</strong> Dữ liệu đã được phân tán, không cần transfer giữa các node</li>
+                            </ul>
+                            
+                            <h6>🔹 3. Distributed SQL Engine</h6>
+                            <ul>
+                                <li><strong>DistSQL:</strong> Query executor được tối ưu cho môi trường phân tán</li>
+                                <li><strong>Pushdown optimization:</strong> Filter và aggregation được thực hiện ngay tại node lưu dữ liệu</li>
+                                <li><strong>Vectorized execution:</strong> Xử lý hàng loạt rows cùng lúc thay vì từng row</li>
+                            </ul>
+                            
+                            <h6>🔹 4. Load Balancing</h6>
+                            <ul>
+                                <li><strong>Phân tải tự động:</strong> Requests được phân phối đều trên ${distData.nodes_used} nodes</li>
+                                <li><strong>Tránh hotspot:</strong> Không có node nào bị quá tải</li>
+                                <li><strong>Sử dụng tài nguyên tối đa:</strong> CPU, RAM, Disk I/O của tất cả nodes được dùng hiệu quả</li>
+                            </ul>
+                            
+                            <h6>🔹 5. Caching & Indexing</h6>
+                            <ul>
+                                <li><strong>Distributed cache:</strong> Mỗi node có cache riêng, tổng cache = ${distData.nodes_used}x lớn hơn</li>
+                                <li><strong>Index locality:</strong> Index được lưu cùng data, truy cập nhanh</li>
+                                <li><strong>Range cache:</strong> Metadata về vị trí ranges được cache để routing nhanh</li>
+                            </ul>
+                            
+                            <div class="alert alert-warning mb-0 mt-3">
+                                <strong>⚠️ Lưu ý:</strong> Trong một số trường hợp, truy vấn cục bộ có thể nhanh hơn nếu:
+                                <ul class="mb-0">
+                                    <li>Dữ liệu nhỏ, vừa với 1 node</li>
+                                    <li>Network latency giữa các node cao</li>
+                                    <li>Chi phí coordinate và merge kết quả lớn hơn lợi ích song song</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    ` : `
+                    <div class="card border-primary mb-3">
+                        <div class="card-header bg-primary text-white">
+                            <h6 class="mb-0">
+                                <i class="bi bi-info-circle"></i> 
+                                Tại sao Truy vấn Cục bộ nhanh hơn trong trường hợp này?
+                            </h6>
+                        </div>
+                        <div class="card-body">
+                            <h6>Các yếu tố ảnh hưởng:</h6>
+                            <ul>
+                                <li><strong>Overhead phân tán:</strong> Chi phí coordinate giữa ${distData.nodes_used} nodes</li>
+                                <li><strong>Network latency:</strong> Thời gian truyền dữ liệu giữa các nodes</li>
+                                <li><strong>Dataset nhỏ:</strong> Dữ liệu có thể vừa với cache của 1 node</li>
+                                <li><strong>Merge cost:</strong> Chi phí tổng hợp kết quả từ nhiều nodes</li>
+                            </ul>
+                            
+                            <div class="alert alert-info mb-0">
+                                <strong>💡 Khi nào phân tán nhanh hơn?</strong>
+                                <ul class="mb-0">
+                                    <li>Dataset lớn (hàng triệu/tỷ rows)</li>
+                                    <li>Query phức tạp với nhiều JOIN, aggregation</li>
+                                    <li>Dữ liệu đã được phân bố đều trên nhiều ranges</li>
+                                    <li>Có nhiều concurrent requests (load cao)</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    `}
+                    
+                    <div class="alert alert-secondary">
+                        <i class="bi bi-speedometer2"></i> 
+                        <strong>Tóm tắt hiệu suất:</strong> 
+                        Chênh lệch thời gian: <strong>${Math.abs(localTime - distTime).toFixed(2)} ms</strong>
+                        ${isFaster ? 
+                            ` - Truy vấn phân tán nhanh hơn <strong>${speedup}%</strong> nhờ xử lý song song trên ${distData.nodes_used} nodes.` : 
+                            ' - Truy vấn cục bộ nhanh hơn do dataset nhỏ và overhead phân tán.'}
+                    </div>
+                `;
+                
+                resultDiv.innerHTML = html;
+                initTooltips();
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="alert alert-danger">Lỗi: ' + error.message + '</div>';
+            }
+        }
+
+        // Show replication info
+        async function showReplication() {
+            const resultDiv = document.getElementById('replicationInfo');
+            resultDiv.innerHTML = '<div class="loading"></div> Đang tải...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/cluster/ranges`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    let html = '<h6>Phân bố Ranges trên các Node:</h6>';
+                    html += '<div class="range-visualization">';
+                    
+                    data.ranges.slice(0, 10).forEach(range => {
+                        html += `
+                            <div class="range-item">
+                                <strong>Range ${range.range_id}</strong>
+                                <br>
+                                <small>Replicas: ${range.replica_count}</small>
+                                <br>
+                                ${range.replicas.map(r => 
+                                    `<span class="replica-badge">Node ${r}</span>`
+                                ).join('')}
+                                <br>
+                                <small>Lease holder: Node ${range.lease_holder}</small>
+                            </div>
+                        `;
+                    });
+                    
+                    html += '</div>';
+                    html += `<p class="mt-3"><small>Hiển thị 10/${data.count} ranges đầu tiên</small></p>`;
+                    
+                    resultDiv.innerHTML = html;
+                } else {
+                    resultDiv.innerHTML = '<div class="alert alert-danger">Lỗi: ' + data.error + '</div>';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="alert alert-danger">Lỗi: ' + error.message + '</div>';
+            }
+        }
+
+        // Show table distribution
+        async function showTableDistribution() {
+            const resultDiv = document.getElementById('tableDistribution');
+            resultDiv.innerHTML = '<div class="loading"></div> Đang tải...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/cluster/table-distribution`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    let html = `
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Tên bảng</th>
+                                    <th>Số Ranges</th>
+                                    <th>Phân bố trên Nodes</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                    `;
+                    
+                    data.tables.forEach(table => {
+                        html += `
+                            <tr>
+                                <td><strong>${table.table_name}</strong></td>
+                                <td>${table.range_count}</td>
+                                <td>
+                                    ${table.nodes.map(n => 
+                                        `<span class="badge bg-success">Node ${n}</span>`
+                                    ).join(' ')}
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    
+                    html += '</tbody></table>';
+                    html += `
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle"></i> 
+                            Dữ liệu được phân bố tự động trên các node để tối ưu hiệu suất và độ tin cậy.
+                        </div>
+                    `;
+                    
+                    resultDiv.innerHTML = html;
+                } else {
+                    resultDiv.innerHTML = '<div class="alert alert-danger">Lỗi: ' + data.error + '</div>';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="alert alert-danger">Lỗi: ' + error.message + '</div>';
+            }
+        }
+
+        // Run failover test
+        async function runFailoverTest() {
+            const resultDiv = document.getElementById('failoverResult');
+            resultDiv.innerHTML = '<div class="loading"></div> Đang chạy test...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/cluster/failover-test`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    let html = `
+                        <div class="alert alert-success">
+                            <h6><i class="bi bi-check-circle-fill"></i> Test thành công!</h6>
+                            <p><strong>Lease holder:</strong> Node ${data.lease_holder}</p>
+                            <p><strong>Replicas:</strong> 
+                                ${data.replicas.map(r => `<span class="badge bg-primary">Node ${r}</span>`).join(' ')}
+                            </p>
+                            <p class="mb-0">
+                                <i class="bi bi-info-circle"></i> 
+                                Dữ liệu đã được ghi và sao chép thành công. 
+                                Nếu Node ${data.lease_holder} bị ngắt kết nối, 
+                                một replica khác sẽ tự động trở thành lease holder.
+                            </p>
+                        </div>
+                    `;
+                    resultDiv.innerHTML = html;
+                } else {
+                    resultDiv.innerHTML = '<div class="alert alert-danger">Lỗi: ' + data.error + '</div>';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="alert alert-danger">Lỗi: ' + error.message + '</div>';
+            }
+        }
+
+        // Check consistency
+        async function checkConsistency() {
+            const resultDiv = document.getElementById('consistencyResult');
+            resultDiv.innerHTML = '<div class="loading"></div> Đang kiểm tra...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/cluster/consistency-check`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const alertClass = data.is_consistent ? 'alert-success' : 'alert-warning';
+                    const icon = data.is_consistent ? 'check-circle-fill' : 'exclamation-triangle-fill';
+                    
+                    let html = `
+                        <div class="alert ${alertClass}">
+                            <h6><i class="bi bi-${icon}"></i> 
+                                ${data.is_consistent ? 'Dữ liệu nhất quán!' : 'Cảnh báo về tính nhất quán'}
+                            </h6>
+                            <table class="table table-sm mt-3 bg-white">
+                                <tr>
+                                    <td><strong>Tổng số bệnh nhân:</strong></td>
+                                    <td>${data.consistency.benhnhan_count}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Tổng số lần khám:</strong></td>
+                                    <td>${data.consistency.lankham_count}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Tổng số ranges:</strong></td>
+                                    <td>${data.consistency.range_count}</td>
+                                </tr>
+                                <tr class="${data.consistency.underreplicated > 0 ? 'table-warning' : ''}">
+                                    <td><strong>Ranges chưa replicate đủ:</strong></td>
+                                    <td>${data.consistency.underreplicated}</td>
+                                </tr>
+                            </table>
+                            ${data.is_consistent ? 
+                                '<p class="mb-0">✓ Tất cả ranges đã được replicate đầy đủ.</p>' :
+                                '<p class="mb-0">⚠ Một số ranges chưa được replicate đủ. Hệ thống đang tự động sao chép.</p>'
+                            }
+                        </div>
+                    `;
+                    resultDiv.innerHTML = html;
+                } else {
+                    resultDiv.innerHTML = '<div class="alert alert-danger">Lỗi: ' + data.error + '</div>';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="alert alert-danger">Lỗi: ' + error.message + '</div>';
+            }
+        }
+
+        // Load data on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadAllData();
+            initTooltips();
+        });
+    </script>
+</body>
+</html>

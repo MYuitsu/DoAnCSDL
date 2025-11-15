@@ -1,0 +1,129 @@
+body {
+    position: relative;
+    background-image: url('../images/medical-background.avif'); /* Placeholder name */
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    z-index: 1;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    padding: 20px;
+}
+
+body::before {
+    content: '';
+    position: fixed; /* Changed to fixed to cover the whole viewport */
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 255, 255, 0.85); /* White overlay with 85% opacity */
+    z-index: -1; /* Places the overlay behind the content */
+}
+
+.container {
+    background-color: rgba(255, 255, 255, 0.6); /* Slightly transparent background for the main content area */
+    border-radius: 15px;
+    padding: 20px;
+}
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+.input-group-text {
+    display: flex;
+    align-items: center;
+    padding: .375rem .75rem;
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--bs-body-color);
+    text-align: center;
+    white-space: nowrap;
+    background-color: var(--bs-tertiary-bg);
+    border: var(--bs-border-width) solid var(--bs-border-color);
+    border-top-right-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+    border-top-left-radius: var(--bs-border-radius) !important;
+    border-bottom-left-radius: var(--bs-border-radius) !important;
+}
+
+.card {
+    background: white;
+    border-radius: 3px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    padding: 20px;
+}
+
+.card-header {
+    background: #0052cc;
+    color: white;
+    padding: 10px 15px;
+    font-weight: 600;
+    border-radius: 3px 3px 0 0;
+    margin: -20px -20px 20px -20px;
+    font-size: 14px;
+}
+
+.table-container {
+    background: white;
+    border-radius: 3px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+
+.table-header {
+    background: #0052cc;
+    color: white;
+    padding: 12px 15px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th {
+    background: #f4f5f7;
+    padding: 12px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: #5e6c84;
+    border-bottom: 2px solid #dfe1e6;
+}
+
+td {
+    padding: 12px;
+    border-bottom: 1px solid #f4f5f7;
+    font-size: 13px;
+    color: #172b4d;
+}
+
+tr:hover {
+    background: #f4f5f7;
+}
+/* ...existing code... */
+.table-wrapper{
+    /* Điều chỉnh giá trị calc() nếu cần cho phù hợp layout của bạn */
+    max-height: calc(90vh - 240px); /* giới hạn chiều cao trong card (card height là 90vh) */
+    overflow-y: auto;               /* bật thanh cuộn dọc khi nội dung vượt quá */
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Đảm bảo bảng chiếm đủ chiều rộng và các cột không nhảy kích thước */
+.table-wrapper table{
+    border-collapse: collapse;
+}
+
+/* Giữ header cố định khi cuộn */
+.table-wrapper thead th{
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #f4f5f7; /* cùng màu header hiện tại */
+}
+
+/* ...existing code... */
