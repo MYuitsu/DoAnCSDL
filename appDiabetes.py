@@ -46,7 +46,7 @@ redis_client = redis.Redis(connection_pool=redis_pool)
 # Multi-node connection for high availability and load balancing
 # Individual node URLs - application will try each until successful
 CLUSTER_NODES = [
-    'cockroachdb://root@10.8.0.10:26257/diabetesdb?sslmode=disable&application_name=DiabetesDB_Flask_App',
+    'cockroachdb://root@10.8.0.10:26257,10.8.0.14:26257/diabetesdb?sslmode=disable&application_name=DiabetesDB_Flask_App',
     'cockroachdb://root@10.8.0.11:26257/diabetesdb?sslmode=disable&application_name=DiabetesDB_Flask_App',
     'cockroachdb://root@10.8.0.12:26257/diabetesdb?sslmode=disable&application_name=DiabetesDB_Flask_App',
     'cockroachdb://root@10.8.0.13:26257/diabetesdb?sslmode=disable&application_name=DiabetesDB_Flask_App',
@@ -1302,4 +1302,4 @@ def search_benhnhan():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)

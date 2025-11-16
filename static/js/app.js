@@ -1,5 +1,5 @@
 $(document).ready(function() {
-    const apiUrl = 'http://127.0.0.1:5000/api';
+    const apiUrl = 'http://0.0.0.0:5000/api';
 
     // --- Modal Stacking Manager ---
     $(document).on('show.bs.modal', '.modal', function () {
